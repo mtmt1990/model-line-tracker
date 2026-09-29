@@ -1,14 +1,15 @@
 import React from 'react';
-import { Database, GitBranch, Sparkles, RefreshCw, Smartphone, Laptop } from 'lucide-react';
+import { Database, GitBranch, RefreshCw, AlertTriangle } from 'lucide-react';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
 interface HeaderProps {
   dataSource: 'supabase' | 'local';
   onRefresh: () => void;
   isLoading: boolean;
+  errorMessage?: string | null;
 }
 
-export const Header: React.FC<HeaderProps> = ({ dataSource, onRefresh, isLoading }) => {
+export const Header: React.FC<HeaderProps> = ({ dataSource, onRefresh, isLoading, errorMessage }) => {
   return (
     <header className="border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur sticky top-0 z-20">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3">
@@ -28,7 +29,7 @@ export const Header: React.FC<HeaderProps> = ({ dataSource, onRefresh, isLoading
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 hidden xs:block">
-                車種 × 型番 × 流動可能4ライン可視化・管理システム
+                車種 × 型番 × 流動可能ライン可視化・管理システム
               </p>
             </div>
           </div>
@@ -40,7 +41,11 @@ export const Header: React.FC<HeaderProps> = ({ dataSource, onRefresh, isLoading
               title={
                 dataSource === 'supabase'
                   ? 'Supabase データベースとリアルタイム接続中'
-                  : 'ローカルストレージ（オフライン/デモ）モードで動作中'
+                  : errorMessage
+                  ? `Supabase接続エラー: ${errorMessage}`
+                  : isSupabaseConfigured
+                  ? 'Supabase権限設定が必要です (SQL実行で解決)'
+                  : '環境変数未設定のためローカル保存モード'
               }
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
                 dataSource === 'supabase'
@@ -48,9 +53,13 @@ export const Header: React.FC<HeaderProps> = ({ dataSource, onRefresh, isLoading
                   : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800'
               }`}
             >
-              <Database className="w-3.5 h-3.5" />
+              {dataSource === 'supabase' ? (
+                <Database className="w-3.5 h-3.5" />
+              ) : (
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              )}
               <span className="hidden sm:inline">
-                {dataSource === 'supabase' ? 'Supabase 接続済' : 'ローカルDB'}
+                {dataSource === 'supabase' ? 'Supabase 接続済' : 'ローカルDB (未接続)'}
               </span>
               <span className="sm:hidden">
                 {dataSource === 'supabase' ? 'Cloud' : 'Local'}

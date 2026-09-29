@@ -23,14 +23,16 @@ import { LineGroupView } from '@/components/LineGroupView';
 import { ItemModal } from '@/components/ItemModal';
 import { ImportExportModal } from '@/components/ImportExportModal';
 import { LineManagerModal } from '@/components/LineManagerModal';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2, Plus, AlertCircle, ExternalLink, Copy, Check } from 'lucide-react';
 
 export default function HomePage() {
   const [items, setItems] = useState<PartModel[]>([]);
   const [lines, setLines] = useState<LineMaster[]>(DEFAULT_LINES);
   const [dataSource, setDataSource] = useState<'supabase' | 'local'>('local');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('matrix');
+  const [copiedSql, setCopiedSql] = useState(false);
 
   // フィルター状態
   const [filter, setFilter] = useState<FilterState>({
@@ -50,6 +52,7 @@ export default function HomePage() {
   // 初期データ読み込み
   const loadData = async () => {
     setIsLoading(true);
+    setErrorMessage(null);
     try {
       const [itemsResult, linesResult] = await Promise.all([
         fetchAllPartModels(),
@@ -57,9 +60,13 @@ export default function HomePage() {
       ]);
       setItems(itemsResult.items);
       setDataSource(itemsResult.source);
+      if (itemsResult.error) {
+        setErrorMessage(itemsResult.error);
+      }
       setLines(linesResult);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load data:', err);
+      setErrorMessage(err?.message || 'データ読み込みに失敗しました');
     } finally {
       setIsLoading(false);
     }
@@ -87,7 +94,6 @@ export default function HomePage() {
   // フィルター適用後のデータリスト
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
-      // 検索語句 (型番・車種・備考)
       if (filter.searchQuery) {
         const q = filter.searchQuery.toLowerCase();
         const matchPart = item.partNumber.toLowerCase().includes(q);
@@ -98,12 +104,10 @@ export default function HomePage() {
         }
       }
 
-      // 車種フィルター
       if (filter.vehicle && item.vehicleModel !== filter.vehicle) {
         return false;
       }
 
-      // ラインフィルター (選択されたラインを含むか)
       if (filter.selectedLines.length > 0) {
         const hasMatch = filter.selectedLines.every((lineId) => {
           const lineDef = lines.find((l) => l.id === lineId);
@@ -116,12 +120,10 @@ export default function HomePage() {
     });
   }, [items, filter, lines]);
 
-  // フィルター更新ハンドラー
   const handleFilterChange = (newFilter: Partial<FilterState>) => {
     setFilter((prev) => ({ ...prev, ...newFilter }));
   };
 
-  // ラインフィルターのトグル
   const handleToggleLineFilter = (lineId: string) => {
     setFilter((prev) => {
       const isSelected = prev.selectedLines.includes(lineId);
@@ -134,19 +136,16 @@ export default function HomePage() {
     });
   };
 
-  // 新規追加
   const handleOpenAdd = () => {
     setEditingItem(null);
     setIsItemModalOpen(true);
   };
 
-  // 編集
   const handleOpenEdit = (item: PartModel) => {
     setEditingItem(item);
     setIsItemModalOpen(true);
   };
 
-  // 保存処理 (新規 or 更新)
   const handleSaveItem = async (
     itemData: Omit<PartModel, 'id' | 'createdAt' | 'updatedAt'> | PartModel
   ) => {
@@ -159,7 +158,6 @@ export default function HomePage() {
     }
   };
 
-  // 削除処理
   const handleDeleteItem = async (id: string) => {
     const item = items.find((i) => i.id === id);
     if (!item) return;
@@ -170,7 +168,6 @@ export default function HomePage() {
     }
   };
 
-  // 一括インポート処理
   const handleBulkImport = async (
     newItems: Omit<PartModel, 'id' | 'createdAt' | 'updatedAt'>[],
     mode: 'replace' | 'merge'
@@ -179,30 +176,76 @@ export default function HomePage() {
     setItems(updated);
   };
 
-  // サンプルデータリセット
   const handleResetSample = async () => {
     const resetItems = await resetToSampleData();
     setItems(resetItems);
     setLines(DEFAULT_LINES);
   };
 
-  // ラインマスターの保存
   const handleSaveLines = async (newLines: LineMaster[]) => {
     setLines(newLines);
     await saveAllLines(newLines);
   };
 
+  const permissionFixSql = `-- Supabase 権限開放スクリプト (SQL Editor で実行)
+GRANT ALL ON TABLE public.part_models TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.lines_master TO anon, authenticated, service_role;
+ALTER TABLE public.part_models DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.lines_master DISABLE ROW LEVEL SECURITY;`;
+
+  const copySql = () => {
+    navigator.clipboard.writeText(permissionFixSql);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2000);
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      {/* グローバルヘッダー */}
       <Header
         dataSource={dataSource}
         onRefresh={loadData}
         isLoading={isLoading}
+        errorMessage={errorMessage}
       />
 
       <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 flex-1 w-full">
-        {/* 統計ダッシュボードカード */}
+        {/* Supabase 権限エラー時のガイダンスバナー */}
+        {dataSource === 'local' && (
+          <div className="mb-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1 text-xs sm:text-sm">
+                  <p className="font-bold text-amber-900 dark:text-amber-200">
+                    現在「ローカル保存（端末内）」で動作しています（クラウド同期未完了）
+                  </p>
+                  <p className="text-amber-700 dark:text-amber-300 text-xs leading-relaxed">
+                    全端末（スマホ・他PC）でリアルタイム共有するには、Supabase の <b>SQL Editor</b> で権限開放スクリプトを実行してください。
+                  </p>
+                  <div className="pt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={copySql}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs"
+                    >
+                      {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedSql ? 'SQLをコピーしました！' : '解決用SQLをコピー'}</span>
+                    </button>
+                    <a
+                      href="https://supabase.com/dashboard"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 text-xs font-medium hover:bg-amber-100/50 transition-colors"
+                    >
+                      <span>Supabase を開く</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <DashboardStats
           items={items}
           lines={lines}
@@ -212,7 +255,6 @@ export default function HomePage() {
           onOpenLineManager={() => setIsLineManagerOpen(true)}
         />
 
-        {/* 検索・絞り込みバー */}
         <FilterBar
           filter={filter}
           onFilterChange={handleFilterChange}
@@ -226,7 +268,6 @@ export default function HomePage() {
           totalFilteredCount={filteredItems.length}
         />
 
-        {/* メインコンテンツ表示部 */}
         {isLoading ? (
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-16 flex flex-col items-center justify-center gap-3">
             <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
@@ -273,12 +314,10 @@ export default function HomePage() {
         )}
       </main>
 
-      {/* フッター */}
       <footer className="border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-400 bg-white/50 dark:bg-slate-900/50">
         <p>型番・車種・流動可能ライン可視化マネージャー © 2026</p>
       </footer>
 
-      {/* モバイル用クイック追加フローティングボタン */}
       <div className="fixed bottom-5 right-5 sm:hidden z-30">
         <button
           onClick={handleOpenAdd}
@@ -288,7 +327,6 @@ export default function HomePage() {
         </button>
       </div>
 
-      {/* モーダル群 */}
       <ItemModal
         isOpen={isItemModalOpen}
         onClose={() => setIsItemModalOpen(false)}

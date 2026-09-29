@@ -5,6 +5,9 @@ import { INITIAL_SAMPLE_DATA } from './sample-data';
 const ITEMS_STORAGE_KEY = 'model_line_tracker_items_v3';
 const LINES_STORAGE_KEY = 'model_line_tracker_lines_v3';
 
+// エラー詳細保持用
+export let lastSupabaseError: string | null = null;
+
 // === ラインマスター関連 ===
 
 export const getLocalLines = (): LineMaster[] => {
@@ -40,7 +43,12 @@ export const fetchAllLines = async (): Promise<LineMaster[]> => {
         .select('*')
         .order('order', { ascending: true });
 
-      if (!error && data && data.length > 0) {
+      if (error) {
+        lastSupabaseError = error.message;
+        throw error;
+      }
+
+      if (data && data.length > 0) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mapped: LineMaster[] = data.map((d: any) => ({
           id: d.id,
@@ -54,8 +62,8 @@ export const fetchAllLines = async (): Promise<LineMaster[]> => {
         saveLocalLines(mapped);
         return mapped;
       }
-    } catch (err) {
-      console.warn('Supabase fetch lines failed, falling back to local:', err);
+    } catch (err: any) {
+      console.warn('Supabase fetch lines failed, falling back to local:', err?.message || err);
     }
   }
   return getLocalLines();
@@ -75,9 +83,13 @@ export const saveAllLines = async (lines: LineMaster[]): Promise<LineMaster[]> =
         order: l.order,
         active: l.active,
       }));
-      await supabase.from('lines_master').upsert(rows, { onConflict: 'id' });
-    } catch (err) {
-      console.warn('Supabase save lines failed:', err);
+      const { error } = await supabase.from('lines_master').upsert(rows, { onConflict: 'id' });
+      if (error) {
+        lastSupabaseError = error.message;
+        throw error;
+      }
+    } catch (err: any) {
+      console.warn('Supabase save lines failed:', err?.message || err);
     }
   }
 
@@ -151,7 +163,7 @@ const mapModelToDb = (model: Partial<PartModel>) => {
   return dbData;
 };
 
-export const fetchAllPartModels = async (): Promise<{ items: PartModel[]; source: 'supabase' | 'local' }> => {
+export const fetchAllPartModels = async (): Promise<{ items: PartModel[]; source: 'supabase' | 'local'; error?: string }> => {
   if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
@@ -159,18 +171,29 @@ export const fetchAllPartModels = async (): Promise<{ items: PartModel[]; source
         .select('*')
         .order('updated_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        lastSupabaseError = error.message;
+        throw error;
+      }
 
+      lastSupabaseError = null;
       if (data && data.length > 0) {
+        const mapped = data.map(mapDbToModel);
+        saveLocalItems(mapped);
         return {
-          items: data.map(mapDbToModel),
+          items: mapped,
           source: 'supabase',
         };
       } else if (data && data.length === 0) {
         return { items: [], source: 'supabase' };
       }
-    } catch (err) {
-      console.warn('Supabase fetch failed, falling back to localStorage:', err);
+    } catch (err: any) {
+      console.warn('Supabase fetch failed, falling back to localStorage:', err?.message || err);
+      return {
+        items: getLocalItems(),
+        source: 'local',
+        error: err?.message || 'Supabase接続エラー',
+      };
     }
   }
 
@@ -202,8 +225,8 @@ export const createPartModel = async (
 
       if (error) throw error;
       return mapDbToModel(data);
-    } catch (err) {
-      console.warn('Supabase insert failed, saving to local only:', err);
+    } catch (err: any) {
+      console.warn('Supabase insert failed, saving to local only:', err?.message || err);
     }
   }
 
@@ -231,8 +254,8 @@ export const updatePartModel = async (item: PartModel): Promise<PartModel> => {
 
       if (error) throw error;
       return mapDbToModel(data);
-    } catch (err) {
-      console.warn('Supabase update failed, saving to local only:', err);
+    } catch (err: any) {
+      console.warn('Supabase update failed, saving to local only:', err?.message || err);
     }
   }
 
@@ -247,8 +270,8 @@ export const deletePartModel = async (id: string): Promise<void> => {
     try {
       const { error } = await supabase.from('part_models').delete().eq('id', id);
       if (error) throw error;
-    } catch (err) {
-      console.warn('Supabase delete failed:', err);
+    } catch (err: any) {
+      console.warn('Supabase delete failed:', err?.message || err);
     }
   }
 
@@ -309,8 +332,8 @@ export const bulkImportPartModels = async (
         saveLocalItems(mapped);
         return mapped;
       }
-    } catch (err) {
-      console.warn('Supabase bulk upsert failed, saving to local:', err);
+    } catch (err: any) {
+      console.warn('Supabase bulk upsert failed, saving to local:', err?.message || err);
     }
   }
 
@@ -327,8 +350,8 @@ export const resetToSampleData = async (): Promise<PartModel[]> => {
       await supabase.from('part_models').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       const rows = INITIAL_SAMPLE_DATA.map(mapModelToDb);
       await supabase.from('part_models').insert(rows);
-    } catch (err) {
-      console.warn('Supabase reset failed:', err);
+    } catch (err: any) {
+      console.warn('Supabase reset failed:', err?.message || err);
     }
   }
   return INITIAL_SAMPLE_DATA;
